@@ -1,0 +1,9 @@
+# Wind outage estimator
+
+Estimates lost energy during a wind-farm data outage from a neighbouring reference farm.
+
+    pip install -r requirements.txt
+    python make_sample_data.py   # optional synthetic data
+    streamlit run app.py
+
+Layout: `app.py` (GUI), `windest/` (data, model, energy, metrics), `sample_data/`.

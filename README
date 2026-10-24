@@ -1,9 +1,141 @@
 # Wind outage estimator
 
-Estimates lost energy during a wind-farm data outage from a neighbouring reference farm.
+Estimates the energy lost when the communication link to a wind farm fails, using neighbouring
+reference wind parks (BayWa r.e. hackathon challenge).
 
+    python -m venv .venv && source .venv/bin/activate
     pip install -r requirements.txt
-    python make_sample_data.py   # optional synthetic data
     streamlit run app.py
 
-Layout: `app.py` (GUI), `windest/` (data, model, energy, metrics), `sample_data/`.
+## Using the app
+
+1. **Upload.** The start page has three drop zones: *Outage turbines* (the affected turbine data), *Reference
+   turbines* (as many neighbouring turbines as you have) and *Power curves* (one per outage turbine). Files are
+   recognised by their columns, so a power curve dropped in the wrong box still works. A review card lists what was
+   found, the detected outage and any problems. "Use hackathon sample data" loads `data_hackathon_baywa_re/`
+   (T* files as outage turbines, the rest as references).
+2. **Settings** in the sidebar (collapsed at first): outage turbines, reference turbines (*Automatic* selection or
+   *Manual* choice of whole parks, turbines grouped by name without the number, H1 and H2 = park H), outage period, method, smoothing, direction sectors, additional parameters, power-curve
+   corrections.
+3. **Results** in five tabs: wind speed, energy loss, *outage replay* (an animation in which the reference turbines
+   send their wind to the outage turbine, with changing speeds, direction, power and energy lost so far, plus a worked
+   example of one 10-minute step with every number of the calculation), method and accuracy, and the insurance
+   report. The replay layout is schematic because the data has no turbine coordinates. "Change data" returns to the upload page.
+
+The look follows Material Design 3 in BayWa-inspired green, olive and yellow (theme in `.streamlit/config.toml`, light and dark; the sidebar starts collapsed).
+
+## Data format
+
+Files for the sample data live in `data_hackathon_baywa_re/`, but any `.xlsx` / `.csv` with these columns works:
+
+- `<turbine>_data.xlsx` (or `.csv`): `turbine_name, timestamp, wind_speed, wind_direction, ambient_temperature,
+  air_pressure, wind_speed_stddev, test_set`, 10-minute values, 1 Jul - 30 Sep 2026 (local time, Europe/Berlin).
+- `<turbine>_power_curve.xlsx`: `turbine_name, wind_speed, power` (kW).
+
+Turbines are named letter + number; the letter is the wind park. Target turbines are T1-T3, reference turbines
+are every turbine outside the target park (H1-H5, O1-O2). The outage is detected as the longest NaN gap in the
+target (here 1-3 Sep) and can be changed with the slider. Missing values are never treated as zero.
+
+## Data split
+
+All splits are in time order, and the model that is scored never sees the rows it is scored on.
+
+| Split | Dates | Use |
+|---|---|---|
+| Train | 1 Jul - 31 Aug | fit the scoring model |
+| Test | 4 - 9 Sep ("shown" test rows) | final accuracy report |
+| Validation | 10 - 30 Sep | choose settings (smoothing, sectors, extra parameters) |
+| Outage | 1 - 3 Sep | the period to predict (the jury checks this) |
+
+The outage prediction uses a final model fitted on train + validation (1 Jul - 31 Aug and 10 - 30 Sep). The test
+rows (4 - 9 Sep) are never used for fitting. Without a `test_set` flag, the last 20 % of the data before the outage is used as validation.
+
+## Method
+
+1. **Analyze.** For every affected turbine, fit a least-squares model on the training rows:
+   `v_target = b + sum over reference parks (w_park * mean wind speed of that park)`.
+   The park averages are smoothed over 5 steps (50 min). The weights are fitted **separately for 8 wind-direction
+   sectors** (direction from the reference turbines), with light ridge shrinkage. If a reference park or the
+   direction is missing at a time step, the model falls back to the all-direction formula, then to a line on the
+   available parks.
+2. **Predict.** Apply the model to the reference winds during the outage. Negative speeds are set to 0.
+3. **Calculate.** Power from the turbine's power curve (linear interpolation), energy = power x 1/6 h per step,
+   summed over the outage.
+
+### Corrections in the power step (sidebar toggles)
+
+- **Prediction error (on).** A predicted speed is never exact and the power curve bends upward, so reading the
+  curve at one speed under-estimates energy (about -6 to -10 % in cross-validation). The curve is averaged over a
+  normal error with the model's RMSE instead.
+- **Air density (on).** Temperature and pressure of the affected turbine are predicted from the reference turbines
+  (straight lines), density = p / (287.05 T), and the wind speed is scaled by (rho / rho0)^(1/3) before the lookup
+  (IEC 61400-12-1 normalisation, rho0 = 1.225 kg/m3 by default). Changes the loss by about -2 %.
+- **Turbulence (off).** Average the curve over the within-interval wind-speed standard deviation (predicted from the
+  reference turbines). Changes the loss by about +5 %.
+
+The density and turbulence corrections cannot be validated without measured power. If the jury computes power from
+the plain curve at the 10-minute mean speed, switch them off to match.
+
+### Automatic reference selection
+
+With *Automatic* (default) the tool picks the reference turbines for each outage turbine from everything that was
+uploaded (`select_references` in `windest/model.py`):
+
+1. Score each reference turbine alone: error of a plain park-average regression, cross-validated over 6 time blocks
+   of the known data (the outage and the test rows are excluded).
+2. Greedy forward selection: add the turbine that lowers the error most while the gain is at least 0.5 %.
+3. Swap pass (replace a chosen turbine by an unchosen one if that helps) and drop pass (remove a turbine that does
+   not help).
+
+Turbines are averaged per park, so one bad turbine cannot drag a whole park down. On the hackathon data 2-4 turbines
+match using all seven; with six junk turbines added to the pool, using everything got worse (T1 test RMSE 1.375 to
+1.456 m/s) while the selection ignored them. In a larger pool only the 15 best single turbines are considered.
+
+### Additional parameters
+
+Optional extra predictors from the reference turbines: turbulence (wind-speed std. dev.), temperature, air
+pressure, 3 h pressure change, time of day, 6 h mean wind, wind change +-1 h. Only **turbulence** helps
+consistently (about 1-2 % lower wind RMSE) and is on by default. The others gave no gain or did not hold up on the
+test rows. The app shows the learned weights and a live "do they help?" table.
+
+### Alternative MCP methods
+
+The sidebar can switch to classic single-reference MCP (Measure-Correlate-Predict) methods for comparison: OLS,
+variance-ratio, orthogonal (TLS) and binned. On this data the default is better on wind speed and power for all
+three turbines, and no worse on total energy once the error correction above is applied.
+
+## Accuracy (default settings, density correction on)
+
+| Turbine | Split | Wind RMSE / MAE (m/s) | Power RMSE (kW) | Energy deviation |
+|---|---|---|---|---|
+| T1 | Val | 1.15 / 0.85 | 661 | -2.4 % |
+| T1 | Test | 1.38 / 1.08 | 789 | +9.6 % |
+| T2 | Val | 0.99 / 0.79 | 592 | +3.8 % |
+| T2 | Test | 1.21 / 0.90 | 722 | +0.6 % |
+| T3 | Val | 1.04 / 0.82 | 618 | -1.0 % |
+| T3 | Test | 1.30 / 1.00 | 802 | -3.3 % |
+
+Predicted loss for 1-3 Sep, T1-T3 together: about 307,000 kWh (80 % range about 144,000 - 527,000 kWh).
+
+Power numbers in the app use the same corrections on measured and predicted wind, so they are not directly
+comparable with a plain-curve evaluation. The 80 % range shifts every predicted speed by +-1.28 x the out-of-sample
+RMSE, which is conservative (it assumes all errors point the same way), not a statistical interval.
+
+## Limits
+
+- Six test days are a small sample; T1's energy is over-estimated by about 10 % on them.
+- The settings were chosen on the validation rows, so the reported accuracy is slightly optimistic. The hidden
+  1-3 Sep window is the only untouched check.
+- Humidity is ignored in the air density. No measured power is available, so power accuracy is judged on the power
+  curve applied to measured wind.
+
+## Layout
+
+- `app.py`: Streamlit GUI (upload page, split, models, corrections, tabs, report draft)
+- `.streamlit/config.toml`: Material Design 3 theme
+- `windest/data.py`: loading xlsx/csv, outage detection
+- `windest/model.py`: park regression with direction sectors and extra parameters, MCP variants, air density
+- `windest/energy.py`: power-curve lookup and error-averaged power, energy
+- `windest/metrics.py`: RMSE / MAE
+- `windest/viz.py`: the animated outage replay (Plotly frames)
+- `make_sample_data.py`, `sample_data/`: old synthetic data, no longer used by the app

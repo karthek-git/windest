@@ -737,3 +737,6 @@ google-services.json
 # Android Profiling
 *.hprof
 
+
+### Project data (not for the repo)
+data_hackathon_baywa_re/

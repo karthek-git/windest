@@ -1,4 +1,4 @@
-# Wind outage estimator
+# Windest
 
 Estimates the energy lost when the communication link to a wind farm fails, using neighbouring
 reference wind parks (BayWa r.e. hackathon challenge).
@@ -17,7 +17,9 @@ reference wind parks (BayWa r.e. hackathon challenge).
 2. **Settings** in the sidebar (collapsed at first): outage turbines, reference turbines (*Automatic* selection or
    *Manual* choice of whole parks, turbines grouped by name without the number, H1 and H2 = park H), outage period, method, smoothing, direction sectors, additional parameters, power-curve
    corrections.
-3. **Results** in five tabs: wind speed, energy loss, *outage replay* (an animation in which the reference turbines
+3. **Export** (top right) downloads the predicted wind speed, power and energy (with the 80 % range) as CSV, one row
+   per turbine and time step or one column per turbine, for the outage only or also for the held-out test days.
+4. **Results** in five tabs: wind speed, energy loss, *outage replay* (an animation in which the reference turbines
    send their wind to the outage turbine, with changing speeds, direction, power and energy lost so far, plus a worked
    example of one 10-minute step with every number of the calculation), method and accuracy, and the insurance
    report. The replay layout is schematic because the data has no turbine coordinates. "Change data" returns to the upload page.

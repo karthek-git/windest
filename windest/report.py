@@ -43,6 +43,20 @@ TXT = {
            "availability losses or other causes unless they are part of the supplied power curve.",
         l2="The reference turbines are not at the affected site; the estimate relies on the statistical relationship between the sites in the training period.",
         l3="Time stamps are local time (Europe/Berlin).",
+        cmp="On the test days at {turbine}, the wind-speed error was {ours} m/s with the method used and {lo} to {hi} m/s with the other "
+            "MCP variants that were compared (OLS, variance-ratio, orthogonal and binned).",
+        h6="6. Standards and references",
+        std1="Method family: the wind speed was reconstructed with Measure-Correlate-Predict (MCP), a standard approach in wind resource "
+             "assessment. The relationship between reference and affected turbines is learned from simultaneous measurements and then "
+             "applied to the reference data of the outage [1, 2].",
+        std2="Power and energy: 10-minute average wind speeds and the manufacturer's power curve, the data basis used for power performance "
+             "in IEC 61400-12-1 [3].",
+        std3="Air density: the wind speed is normalised to the air density of the power curve with v × (ρ / ρ₀)^(1/3), ρ₀ = {rho0} kg/m³, "
+             "the normalisation described in IEC 61400-12-1 [3].",
+        std4="These references describe the methods used. This report does not claim formal certification or compliance with a standard.",
+        refs=["[1] Basse, A. et al. (2021), Wind Energy Science 6, 1473: long-term correction of short-term wind measurements (MCP).",
+              "[2] Rogers, A.L., Rogers, J.W., Manwell, J.F. (2005), Comparison of the performance of four measure-correlate-predict algorithms.",
+              "[3] IEC 61400-12-1, Wind energy generation systems - Part 12-1: Power performance measurements of electricity producing wind turbines."],
         attach="Attachment: {file} (10-minute wind speed, power and energy estimates for the outage).",
         close="Please let me know if you need further information or the underlying data.",
         regards="Kind regards", none_ref="",
@@ -87,6 +101,20 @@ TXT = {
            "Verfügbarkeitsverluste oder andere Ursachen sind nur enthalten, soweit sie in der gelieferten Leistungskurve stecken.",
         l2="Die Referenzanlagen stehen nicht am betroffenen Standort; die Schätzung beruht auf dem statistischen Zusammenhang der Standorte im Trainingszeitraum.",
         l3="Zeitstempel sind Ortszeit (Europe/Berlin).",
+        cmp="An den Testtagen bei {turbine} lag der Fehler der Windgeschwindigkeit bei {ours} m/s mit dem verwendeten Verfahren und bei {lo} bis {hi} m/s "
+            "mit den übrigen verglichenen MCP-Varianten (OLS, Varianzverhältnis, orthogonal und klassiert).",
+        h6="6. Normen und Quellen",
+        std1="Verfahrensfamilie: Die Windgeschwindigkeit wurde mit Measure-Correlate-Predict (MCP) rekonstruiert, einem Standardansatz der "
+             "Windpotenzialbestimmung. Der Zusammenhang zwischen Referenz- und betroffener Anlage wird aus gleichzeitigen Messungen gelernt und dann "
+             "auf die Referenzdaten des Ausfalls angewendet [1, 2].",
+        std2="Leistung und Energie: 10-Minuten-Mittelwerte der Windgeschwindigkeit und die Herstellerleistungskurve, die Datenbasis der "
+             "Leistungskurvenmessung nach IEC 61400-12-1 [3].",
+        std3="Luftdichte: Die Windgeschwindigkeit wird mit v × (ρ / ρ₀)^(1/3), ρ₀ = {rho0} kg/m³, auf die Luftdichte der Leistungskurve normiert, "
+             "wie in IEC 61400-12-1 beschrieben [3].",
+        std4="Diese Quellen beschreiben die verwendeten Verfahren. Dieser Bericht erhebt keinen Anspruch auf formale Zertifizierung oder Normkonformität.",
+        refs=["[1] Basse, A. et al. (2021), Wind Energy Science 6, 1473: Langzeitkorrektur kurzer Windmessungen (MCP).",
+              "[2] Rogers, A.L., Rogers, J.W., Manwell, J.F. (2005), Comparison of the performance of four measure-correlate-predict algorithms.",
+              "[3] IEC 61400-12-1, Wind energy generation systems - Part 12-1: Power performance measurements of electricity producing wind turbines."],
         attach="Anlage: {file} (10-Minuten-Werte für Windgeschwindigkeit, Leistung und Energie während des Ausfalls).",
         close="Für weitere Informationen oder die zugrunde liegenden Daten stehe ich gern zur Verfügung.",
         regards="Mit freundlichen Grüßen", none_ref="",
@@ -158,6 +186,12 @@ def build_report(lang: str, f: dict) -> tuple[str, str]:
         greeting = t["greeting"].format(name=f["recipient"])
     else:
         greeting = "Sehr geehrte Damen und Herren," if de else "Dear Sir or Madam,"
+    cmp_line = ""
+    if f.get("method_cmp"):
+        mc = f["method_cmp"]
+        cmp_line = t["cmp"].format(turbine=mc["turbine"], ours=fl(mc["ours"], 2), lo=fl(mc["lo"], 2), hi=fl(mc["hi"], 2))
+    rho0_txt = fl(f["density"]["rho0"], 3) if f.get("density") else fl(1.225, 3)
+    std = [t["std1"], t["std2"]] + ([t["std3"].format(rho0=rho0_txt)] if f.get("density") else []) + [t["std4"]]
     body = "\n".join([
         greeting, "",
         t["intro"].format(turbines=_list(names, lang), site_in=site_in), "",
@@ -166,8 +200,9 @@ def build_report(lang: str, f: dict) -> tuple[str, str]:
         t["h2"], table, "",
         "  " + t["total_line"].format(total=num(f["total"]), lo=num(f["lo"]), hi=num(f["hi"])), "",
         t["h3"], *[f"  - {n}" for n in notes], "",
-        t["h4"], "  " + acc, "  " + t["range_txt"], "",
+        t["h4"], "  " + acc, *(["  " + cmp_line] if cmp_line else []), "  " + t["range_txt"], "",
         t["h5"], f"  - {t['l1']}", f"  - {t['l2']}", f"  - {t['l3']}", "",
+        t["h6"], *[f"  - {x}" for x in std], "", *[f"  {r}" for r in t["refs"]], "",
         t["attach"].format(file=f["csv_name"]), t["close"], "",
         t["regards"], f.get("sender") or "", f.get("company") or "",
     ]).rstrip() + "\n"
@@ -197,3 +232,47 @@ def build_eml(subject: str, body: str, csv_text: str, csv_name: str, to: str = "
     msg.set_content(body)
     msg.add_attachment(csv_text.encode("utf-8"), maintype="text", subtype="csv", filename=csv_name)
     return bytes(msg)
+
+
+def export_csv(parts: dict, tests: dict | None = None, layout: str = "long") -> str:
+    """Predicted values as CSV.
+
+    parts: {turbine: DataFrame(index=timestamp; wind_ms, power_kw, energy_kwh, energy_low_kwh, energy_high_kwh)} for the outage.
+    tests: optional {turbine: DataFrame(index=timestamp; measured_wind_ms, wind_ms)} for the held-out test days.
+    layout: "long" (one row per turbine and time step) or "wide" (one row per time step, columns per turbine).
+    """
+    if layout == "wide":
+        cols = {}
+        for name, df in parts.items():
+            cols[f"{name}_wind_ms"] = df["wind_ms"]
+            cols[f"{name}_power_kw"] = df["power_kw"]
+            cols[f"{name}_energy_kwh"] = df["energy_kwh"]
+        out = pd.DataFrame(cols)
+        out.insert(0, "period", "outage")
+        if tests:
+            tcols = {}
+            for name, df in tests.items():
+                tcols[f"{name}_wind_ms"] = df["wind_ms"]
+                tcols[f"{name}_measured_wind_ms"] = df["measured_wind_ms"]
+            t = pd.DataFrame(tcols)
+            t.insert(0, "period", "test")
+            out = pd.concat([out, t]).sort_index()
+    else:
+        frames = []
+        for name, df in parts.items():
+            d = df.copy()
+            d.insert(0, "turbine", name)
+            d.insert(1, "period", "outage")
+            frames.append(d)
+        for name, df in (tests or {}).items():
+            d = df.copy()
+            d.insert(0, "turbine", name)
+            d.insert(1, "period", "test")
+            frames.append(d)
+        out = pd.concat(frames).sort_index(kind="stable")
+        lead = [c for c in ["turbine", "period", "measured_wind_ms", "wind_ms"] if c in out.columns]
+        out = out[lead + [c for c in out.columns if c not in lead]]
+        out = out.rename(columns={"wind_ms": "predicted_wind_ms", "power_kw": "predicted_power_kw",
+                                  "energy_kwh": "predicted_energy_kwh"})
+    out.index.name = "timestamp"
+    return out.round(3).to_csv(date_format="%Y-%m-%d %H:%M")

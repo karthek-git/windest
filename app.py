@@ -5,7 +5,7 @@ import streamlit as st
 
 from windest import data, energy, metrics, model, report, viz
 
-st.set_page_config(page_title="Wind outage estimator", page_icon=":material/air:", layout="wide",
+st.set_page_config(page_title="Windest", page_icon=":material/air:", layout="wide",
                    initial_sidebar_state="collapsed")
 
 SAMPLE_FOLDER = "data_hackathon_baywa_re"
@@ -25,8 +25,8 @@ def read(files):
 
 # ---------------- Step 1: upload ----------------
 if st.session_state.get("dataset") is None:
-    st.title(":material/air: Wind outage estimator")
-    st.caption("Estimate the energy lost during a turbine data outage from the wind measured at reference turbines.")
+    st.title(":material/air: Windest")
+    st.caption("Wind outage estimator: estimate the energy lost during a turbine data outage from the wind measured at reference turbines.")
     with st.container(horizontal=True):
         st.badge("1  Upload data", icon=":material/upload_file:", color="primary")
         st.badge("2  Review settings", icon=":material/tune:", color="gray")
@@ -115,8 +115,8 @@ curves = {**r_cur, **t_cur, **c_cur}
 tgt_turbines = t_tur
 ref_turbines = {k: v for k, v in r_tur.items() if k not in t_tur}
 
-top, top_btn = st.columns([5, 1], vertical_alignment="center")
-top.title(":material/air: Wind outage estimator")
+top, top_exp, top_btn = st.columns([5, 1, 1], vertical_alignment="center")
+top.title(":material/air: Windest")
 top.caption(":material/tune: Settings are in the sidebar, open it with the arrow at the top left.")
 if top_btn.button("Change data", icon=":material/upload_file:", width="stretch"):
     st.session_state.dataset = None
@@ -375,15 +375,46 @@ def compare_extras(_key, focus, ref_mode, ref_parks, start, end, smooth, sectors
 
 
 hours = (end - start).total_seconds() / 3600 + 1 / 6
+
+# ---------------- Export of the predicted values ----------------
+exp_parts = {t: pd.DataFrame({"wind_ms": R[t]["pred"][R[t]["out"]], "power_kw": R[t]["p"], "energy_kwh": R[t]["e"],
+                              "energy_low_kwh": R[t]["e_lo"], "energy_high_kwh": R[t]["e_hi"]}) for t in targets}
+exp_tests = {t: pd.DataFrame({"measured_wind_ms": R[t]["y"][R[t]["split"]["test"].to_numpy()],
+                              "wind_ms": R[t]["pred_by"]["Test"][R[t]["split"]["test"].to_numpy()]})
+             for t in targets if R[t]["split"]["test"].any()}
+with top_exp:
+    with st.popover("Export", icon=":material/download:", width="stretch"):
+        st.markdown("**Download the predicted values**")
+        exp_scope = st.segmented_control("Rows", ["Outage only", "Outage + test days"], default="Outage only",
+                                         key="exp_scope") or "Outage only"
+        exp_layout = st.segmented_control("Layout", ["One row per turbine", "One column per turbine"],
+                                          default="One row per turbine", key="exp_layout") or "One row per turbine"
+        exp_csv = report.export_csv(exp_parts, exp_tests if exp_scope != "Outage only" else None,
+                                    "wide" if exp_layout.startswith("One column") else "long")
+        st.download_button("Download CSV", exp_csv, file_name=f"windest_predictions_{start:%Y%m%d}_{end:%Y%m%d}.csv",
+                           mime="text/csv", icon=":material/download:", type="primary", width="stretch",
+                           on_click="ignore")
+        st.caption("Wind speed in m/s, power in kW, energy in kWh per 10 minutes, with the 80 % range of the energy. "
+                   "Test days contain the measured and predicted wind speed only. Times are local (Europe/Berlin).")
+
 total = sum(r["e"].sum() for r in R.values())
 total_lo = sum(r["e_lo"].sum() for r in R.values())
 total_hi = sum(r["e_hi"].sum() for r in R.values())
 
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Estimated energy loss", f"{total:,.0f} kWh", border=True)
-c2.metric("80 % range", f"{total_lo:,.0f} – {total_hi:,.0f} kWh", border=True)
-c3.metric("Outage duration", f"{hours:.1f} h", border=True)
-c4.metric("Turbines affected", len(targets), border=True)
+hero, side = st.columns([3, 2])
+with hero.container(border=True):
+    st.metric("Estimated energy loss", f"{total:,.0f} kWh")
+    st.caption(f":material/swap_vert: 80 % range {total_lo:,.0f} to {total_hi:,.0f} kWh · {', '.join(targets)}")
+with side:
+    s1, s2 = st.columns(2)
+    with s1.container(border=True):
+        st.caption(":material/schedule: Outage duration")
+        st.subheader(f"{hours:.1f} h")
+        st.caption(f"{start:%d %b %H:%M} to {end:%d %b %H:%M}")
+    with s2.container(border=True):
+        st.caption(":material/wind_power: Turbines affected")
+        st.subheader(f"{len(targets)}")
+        st.caption(", ".join(targets))
 
 focus = st.segmented_control("Turbine shown in the charts", targets, default=targets[0]) or targets[0]
 r = R[focus]
@@ -495,7 +526,7 @@ with tab_flow:
                            f"{model.sector_label(int(((ctx['direction'].loc[t_pick] + 180 / m.sectors) % 360) // (360 / m.sectors)), m.sectors)} "
                            "sector are used.")
             tbl = pd.DataFrame(rows, columns=["Input", "Value", "Weight", "Adds (m/s)"]).set_index("Input")
-            st.dataframe(tbl.round(3), width="stretch")
+            st.dataframe(tbl.map(lambda v: "" if pd.isna(v) else f"{v:.3f}"), width="stretch")
         else:
             st.caption("A reference value is missing at this time, so the simpler fallback formula "
                        "(a line on the available parks) is used.")
@@ -691,19 +722,10 @@ normalisation). Humidity is ignored.
 
 # ---------------- Report ----------------
 with tab_report:
-    st.markdown("Fill in the details, check the text and download the e-mail. The e-mail file opens as a draft in "
-                "your mail program with the prediction data attached.")
-    f1, f2 = st.columns(2)
-    lang_label = f1.segmented_control("Language", ["English", "Deutsch"], default="English") or "English"
+    st.markdown("Copy the subject and text with the copy icon in the top right of each box, paste them into your mail "
+                "program and attach the prediction data.")
+    lang_label = st.segmented_control("Language", ["English", "Deutsch"], default="English") or "English"
     lang = "de" if lang_label == "Deutsch" else "en"
-    site = f2.text_input("Wind farm / site name", placeholder="e.g. Windpark Nord")
-    g1, g2, g3 = st.columns(3)
-    claim = g1.text_input("Claim or policy reference", placeholder="optional")
-    recipient = g2.text_input("Insurer contact", placeholder="e.g. Ms Schmidt")
-    to_addr = g3.text_input("Insurer e-mail", placeholder="optional")
-    h1_, h2_ = st.columns(2)
-    sender = h1_.text_input("Your name")
-    company = h2_.text_input("Your company")
 
     first = R[targets[0]]
     sp = first["split"]["test"]
@@ -730,7 +752,11 @@ with tab_report:
     refs_text = ("; ".join(f"{t}: {', '.join(R[t]['refs'])}" for t in targets) if ref_mode == "Automatic"
                  else "wind parks " + ", ".join(ref_parks))
     csv_name = "outage_predictions.csv"
-    facts = dict(site=site, claim=claim, recipient=recipient, sender=sender, company=company, turbines=rows,
+    cmp_df = compare_methods(data_key, focus, ref_mode, tuple(ref_parks), start, end, smooth, sectors, use_expected,
+                             use_density, rho0, use_turb, tuple(extras_sel)).set_index("Method")
+    mine, others = cmp_df.loc[method_name, "Wind RMSE test (m/s)"], cmp_df.drop(index=method_name)["Wind RMSE test (m/s)"]
+    method_cmp = dict(turbine=focus, ours=float(mine), lo=float(others.min()), hi=float(others.max())) if len(others) else None
+    facts = dict(method_cmp=method_cmp, turbines=rows,
                  start=start, end=end, hours=hours, total=total, lo=total_lo, hi=total_hi, refs_text=refs_text,
                  method_kind=mk, method_name=method_name, sectors=getattr(mfin, "sectors", 1),
                  extras=[n for n in extras_sel if getattr(mfin, "extra_cols", None)] if mk == "reg" else [],
@@ -741,16 +767,11 @@ with tab_report:
                               "energy_low_kwh": R[t]["e_lo"], "energy_high_kwh": R[t]["e_hi"]}) for t in targets}
     csv_text = report.predictions_csv(parts)
 
-    st.text_input("Subject", value=subject, key=f"subj_{hash(subject)}")
-    text = st.text_area("E-mail text (editable)", value=body, height=520, key=f"body_{hash(body)}")
-    subj = st.session_state.get(f"subj_{hash(subject)}", subject)
-    with st.container(horizontal=True):
-        st.download_button("E-mail draft (.eml)", report.build_eml(subj, text, csv_text, csv_name, to_addr, sender),
-                           file_name="outage_report.eml", mime="message/rfc822", icon=":material/mail:",
-                           type="primary", on_click="ignore")
-        st.download_button("Text (.txt)", f"Subject: {subj}\n\n{text}", file_name="outage_report.txt",
-                           mime="text/plain", icon=":material/description:", on_click="ignore")
-        st.download_button("Predictions (.csv)", csv_text, file_name=csv_name, mime="text/csv",
-                           icon=":material/table_chart:", on_click="ignore")
+    st.caption("Subject")
+    st.code(subject, language=None, wrap_lines=True)
+    st.caption("E-mail text")
+    st.code(body, language=None, wrap_lines=True, height=560)
+    st.download_button("Download predictions for the attachment (.csv)", csv_text, file_name=csv_name, mime="text/csv",
+                       icon=":material/table_chart:", type="primary", on_click="ignore")
     with st.expander("Preview of the prediction data"):
         st.dataframe(pd.read_csv(__import__("io").StringIO(csv_text)).head(30), width="stretch")
